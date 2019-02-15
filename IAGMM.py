@@ -132,19 +132,10 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
         for k in range(D):
             vary[k] = np.var(X[:, k])
         precisiony = 1/vary
-
         z = draw_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr, N, M, D)
-        log_likelihood = np.zeros((M, D), dtype=mpmath.mpf)
+
         # the observations belonged to class j
         Xj = [X[np.where(c==j), :] for j, nj in enumerate(n)]
-        j = 0
-        # get the likelihood
-        for x, nj in zip(Xj, n):
-            x = x[0]
-            for k in range(D):
-                log_likelihood[j, k] = get_log_likelihood(x, mu, s_l, s_r, z, mu_irr, s_l_irr, s_r_irr, j, k)
-            j += 1
-
         mu_cache = mu
         mu = np.zeros((M, D))
         mu_irr_cache = mu_irr
@@ -155,11 +146,11 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
             x = x[0]
             # for every dimensionality, compute the posterior distribution of mu_jk
             for k in range(D):
-                mu[j, k] = MH_mu_jk(mu_cache[j, k], s_l[j, k], s_r[j, k], r, lam, z, j, k, x)
-                mu_irr[j, k] = MH_mu_jk(mu_irr_cache[j, k], s_l_irr[j, k],s_r_irr[j, k], r, lam, 1-z, j, k, x)
+                mu[j, k] = MH_Sampling_posterior_mu_jk(mu_cache[j, k], s_l[j, k], s_r[j, k], r, lam, z, j,
+                                                    k, x)
+                mu_irr[j, k] = MH_Sampling_posterior_mu_jk(mu_irr_cache[j, k], s_l_irr[j, k],s_r_irr[j, k],
+                                                    r, lam, 1-z, j, k, x)
             j += 1
-        print(mu)
-        print(mu_irr)
 
         # draw lambda from posterior
         mu_sum = np.sum(mu, axis=0)
@@ -180,34 +171,22 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
             for muj_irr in mu_irr:
                 temp_para_sum[k] += np.outer((muj_irr[k] - lam[k]), np.transpose(muj_irr[k] - lam[k]))
         r = np.array([np.squeeze(draw_gamma((2*M+1)/2, 2/(vary[k] + temp_para_sum[k]))) for k in range(D)])
-        print(r)
-        time.sleep(100)
 
         # draw alpha from posterior. Because its not standard form, using ARS to sampling
         alpha = draw_alpha(M, N)
 
-        # draw sj from posterior (depends on mu, c, beta, w), eq 8 (Rasmussen 2000)
+        # draw sj from posterior (
         for j, nj in enumerate(n):
             Xj = X[np.where(c == j), :][0]
-            # for every dimensionality, compute the posterior distribution of s_ljk, s_rjk
             for k in range(D):
-                x_k = Xj[:, k]
-                # p represent the number of x_ik < mu_jk
-                p = x_k[x_k < mu[j][k]].shape[0]
-                # q represent the number of x_ik >= mu_jk, q = n - p
-                q = x_k[x_k >= mu[j][k]].shape[0]
-                # x_l represents the data from i to n of x_ik, which x_ik < mu_jk
-                x_l = x_k[x_k < mu[j][k]]
-                # x_r represents the data from i to n of x_ik, which x_ik >= mu_jk
-                x_r = x_k[x_k >= mu[j][k]]
-                cumculative_sum_left_equation = np.sum((x_l - mu[j][k]) **2)
-                cumculative_sum_right_equation = np.sum((x_r - mu[j][k]) **2)
-
-                # def Metropolis_Hastings_Sampling_posterior_sljk(s_ljk, s_rjk, nj, beta, w, sum):
-                s_l[j][k] = Metropolis_Hastings_Sampling_posterior_sljk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
-                                                nj=nj, beta=beta_l[k], w=w_l[k], sum=cumculative_sum_left_equation)
-                s_r[j][k] = Metropolis_Hastings_Sampling_posterior_srjk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
-                                                nj=nj, beta=beta_r[k], w=w_r[k], sum=cumculative_sum_right_equation)
+                s_l[j, k] = MH_Sampling_posterior_sljk(mu[j, k], s_l[j, k], s_r[j, k],
+                                beta_l, w_l, z, j, k, Xj)
+                s_l_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
+                                beta_l, w_l, 1-z, j, k, Xj)
+                s_r[j, k] = MH_Sampling_posterior_srjk(mu[j, k], s_l[j, k], s_r[j, k],
+                                beta_r, w_r, z, j, k, Xj)
+                s_r_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
+                                beta_r, w_r, 1-z, j, k, Xj)
 
         # compute the unrepresented probability - apply simulated annealing, eq 17 (Rasmussen 2000)
         p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )

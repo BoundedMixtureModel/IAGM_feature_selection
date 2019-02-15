@@ -54,9 +54,25 @@ def draw_MVNormal(mean=0, cov=1, size=1):
 
 
 @jit(nogil=True,)
+def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk):
+    '''
+    Asymmetric Gassuian distribution pdf for all observations
+    '''
+    y_k = np.zeros(x_k.shape[0])
+    for i, xik in enumerate(x_k):
+        if xik < mu_jk:
+            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+                   * np.exp(- 0.5 * s_ljk * (xik- mu_jk)**2)
+        else:
+            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+                   * np.exp(- 0.5 * s_rjk * (xik- mu_jk)**2)
+    return y_k
+
+
+@jit(nogil=True,)
 def AGD_pdf(x_k, mu, s_l, s_r):
     '''
-    Asymmetric Gassuian distribution pdf
+    Asymmetric Gassuian distribution pdf for single observation
     '''
     if x_k < mu:
         return np.sqrt(2 / np.pi) / (np.power(s_l, -0.5) + np.power(s_r, -0.5)) \
@@ -76,31 +92,26 @@ def AGD_pdf_feature_selction(x, j, D, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_ir
               AGD_pdf(x[k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k]))
     return y
 
-def get_log_likelihood(x, mu, s_l, s_r, z, mu_irr, s_l_irr, s_r_irr, j, k):
-    log_likelihood = mpmath.mpf(0.0)
-    for i, x_i in enumerate(x):
-        log_likelihood += z[i, j, k] * mpmath.log(AGD_pdf(x_i[k], mu[j, k], s_l[j, k], s_r[j, k])) + \
-                                (1 - z[i, j, k]) * mpmath.log(AGD_pdf(x_i[k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k]))
-    return np.float64(log_likelihood)
 
 def compare_mu_jk(mu_jk, previous_mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
     '''
     compare candiate with previous parameter
     when sampling mu_jk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
     '''
-    likelihood_ratio = mpmath.mpf(1)
+    compared_log_likelihood = 0
     for i, x_i in enumerate(X):
-        likelihood_ratio *= (mpmath.power(AGD_pdf(x_i[k], mu_jk, s_ljk, s_rjk), z[i, j, k]))/ \
-            (mpmath.power(AGD_pdf(x_i[k], previous_mu_jk, s_ljk, s_rjk), z[i, j, k]))
+        compared_log_likelihood += z[i, j, k] * (np.log(AGD_pdf(x_i[k], mu_jk, s_ljk, s_rjk))- \
+                                                 np.log(AGD_pdf(x_i[k], previous_mu_jk, s_ljk, s_rjk)))
+    likelihood_ratio = np.exp(compared_log_likelihood)
     prior = draw_normal(loc=lam[k], scale=1/r[k])[0] / draw_normal(loc=lam[k], scale=1/r[k])[0]
     return likelihood_ratio * prior
 
 
-def Metropolis_Hastings_Sampling_posterior_mu_jk(mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
+def MH_Sampling_posterior_mu_jk(mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
     '''
     Metropolis Hastings sampling for the postiors of mu_jk parameter
     '''
-    n = 1000
+    n = 750
     x = mu_jk
     vec = []
     vec.append(x)
@@ -115,71 +126,34 @@ def Metropolis_Hastings_Sampling_posterior_mu_jk(mu_jk, s_ljk, s_rjk, r, lam, z,
     return vec[-1]
 
 
-
-
-def c_jk(mu_jk, previous_mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
+def compare_s_ljk(s_ljk, previous_s_ljk, mu_jk, s_rjk, beta, w, z, j, k, X):
     '''
     compare candiate with previous parameter
-    when sampling mu_jk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
+    when sampling s_ljk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
     '''
-    compared_log_likelihood = 0
+    compared_log_likelihood = 0.0
     for i, x_i in enumerate(X):
         compared_log_likelihood += z[i, j, k] * (np.log(AGD_pdf(x_i[k], mu_jk, s_ljk, s_rjk))- \
-                                                 np.log(AGD_pdf(x_i[k], previous_mu_jk, s_ljk, s_rjk)))
+                                                 np.log(AGD_pdf(x_i[k], mu_jk, previous_s_ljk, s_rjk)))
     likelihood_ratio = np.exp(compared_log_likelihood)
-    prior = draw_normal(loc=lam[k], scale=1/r[k])[0] / draw_normal(loc=lam[k], scale=1/r[k])[0]
+    prior = draw_gamma(beta[k]/2, 2/(beta[k]*w[k]))[0] / draw_gamma(beta[k]/2, 2/(beta[k]*w[k]))[0]
     return likelihood_ratio * prior
 
 
-def MH_mu_jk(mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
+def MH_Sampling_posterior_sljk(mu_jk, s_ljk, s_rjk, beta, w, z, j, k, X):
     '''
-    Metropolis Hastings sampling for the postiors of mu_jk parameter
+    Metropolis Hastings sampling for the postiors of s_ljk parameter
     '''
     n = 750
-    x = mu_jk
-    vec = []
-    vec.append(x)
-    for i in range(n):
-        candidate = norm.rvs(x, 0.75, 1)[0]
-        # acceptance probability
-        alpha = min([1., c_jk(candidate, x, s_ljk, s_rjk, r, lam, z, j, k, X)])
-        u = np.random.uniform(0,1)
-        if u < alpha:
-            x = candidate
-            vec.append(x)
-    return vec[-1]
-
-
-
-
-
-
-def compare_s_ljk(s_ljk, previous_s_ljk, s_rjk, nj, beta, w, sum):
-    s_ljk = mpmath.mpf(s_ljk)
-    s_rjk = mpmath.mpf(s_rjk)
-    a1 = mpmath.power(s_ljk, -0.5) + mpmath.power(s_rjk, -0.5)
-    a2 = mpmath.power(previous_s_ljk, -0.5) + mpmath.power(s_rjk, -0.5)
-    ratio_a = a2/a1
-    ratio_a_power = np.power(ratio_a, nj)
-    ratio_b = mpmath.power(s_ljk, (beta/2-1)) * mpmath.exp(-0.5*s_ljk*sum) * mpmath.exp(-0.5*w*beta*s_ljk) \
-            / (mpmath.power(previous_s_ljk, (beta/2-1)) * mpmath.exp(-0.5*previous_s_ljk*sum) * mpmath.exp(-0.5*w*beta*previous_s_ljk))
-    return ratio_a_power * ratio_b
-
-
-def Metropolis_Hastings_Sampling_posterior_sljk(s_ljk, s_rjk, nj, beta, w, sum):
-    n = 1000
     x = s_ljk
     vec = []
     vec.append(x)
     for i in range(n):
-        # proposed distribution make sure 25%-40% accept
-        # random_walk algorithm, using symmetric Gaussian distribution, so it's simplified to Metropolis algoritm
-        # the parameter is mu: the previous state of x and variation
         candidate = norm.rvs(x, 0.75, 1)[0]
         if candidate <= 0:
             candidate = np.abs(candidate)
         # acceptance probability
-        alpha = min([1., compare_s_ljk(candidate, x, s_rjk, nj, beta, w, sum)])
+        alpha = min([1., compare_s_ljk(candidate, x, mu_jk, s_rjk, beta, w, z, j, k, X)])
         u = np.random.uniform(0,1)
         if u < alpha:
             x = candidate
@@ -187,32 +161,34 @@ def Metropolis_Hastings_Sampling_posterior_sljk(s_ljk, s_rjk, nj, beta, w, sum):
     return vec[-1]
 
 
-def compare_s_rjk(s_rjk, previous_s_rjk, s_ljk, nj, beta, w, sum):
-    s_ljk = mpmath.mpf(s_ljk)
-    s_rjk = mpmath.mpf(s_rjk)
-    a1 = mpmath.power(s_ljk, -0.5) + mpmath.power(s_rjk, -0.5)
-    a2 = mpmath.power(s_ljk, -0.5) + mpmath.power(previous_s_rjk, -0.5)
-    ratio_a = a2/a1
-    ratio_a_power = np.power(ratio_a, nj)
-    ratio_b = mpmath.power(s_rjk, (beta/2-1)) * mpmath.exp(-0.5*s_rjk*sum) * mpmath.exp(-0.5*w*beta*s_rjk) \
-            / (mpmath.power(previous_s_rjk, (beta/2-1)) * mpmath.exp(-0.5*previous_s_rjk*sum) * mpmath.exp(-0.5*w*beta*previous_s_rjk))
-    return ratio_a_power * ratio_b
+def compare_s_rjk(s_rjk, previous_s_rjk, mu_jk, s_ljk, beta, w, z, j, k, X):
+    '''
+    compare candiate with previous parameter
+    when sampling s_rjk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
+    '''
+    compared_log_likelihood = 0.0
+    for i, x_i in enumerate(X):
+        compared_log_likelihood += z[i, j, k] * (np.log(AGD_pdf(x_i[k], mu_jk, s_ljk, s_rjk))- \
+                                                 np.log(AGD_pdf(x_i[k], mu_jk, s_ljk, previous_s_rjk)))
+    likelihood_ratio = np.exp(compared_log_likelihood)
+    prior = draw_gamma(beta[k]/2, 2/(beta[k]*w[k]))[0] / draw_gamma(beta[k]/2, 2/(beta[k]*w[k]))[0]
+    return likelihood_ratio * prior
 
 
-def Metropolis_Hastings_Sampling_posterior_srjk(s_ljk, s_rjk, nj, beta, w, sum):
-    n = 1000
+def MH_Sampling_posterior_srjk(mu_jk, s_ljk, s_rjk, beta, w, z, j, k, X):
+    '''
+    Metropolis Hastings sampling for the postiors of s_rjk parameter
+    '''
+    n = 750
     x = s_rjk
     vec = []
     vec.append(x)
     for i in range(n):
-        # proposed distribution make sure 25%-40% accept
-        # random_walk algorithm, using symmetric Gaussian distribution, so it's simplified to Metropolis algoritm
-        # the parameter is mu: the previous state of x and variation
         candidate = norm.rvs(x, 0.75, 1)[0]
         if candidate <= 0:
             continue
         # acceptance probability
-        alpha = min([1., compare_s_rjk(candidate, x, s_ljk, nj, beta, w, sum)])
+        alpha = min([1., compare_s_rjk(candidate, x, mu_jk, s_ljk, beta, w, z, j, k, X)])
         u = np.random.uniform(0,1)
         if u < alpha:
             x = candidate
@@ -220,24 +196,10 @@ def Metropolis_Hastings_Sampling_posterior_srjk(s_ljk, s_rjk, nj, beta, w, sum):
     return vec[-1]
 
 
-@jit(nogil=True,)
-def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk):
-    y_k = np.zeros(x_k.shape[0])
-    for i, xik in enumerate(x_k):
-        if xik < mu_jk:
-            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
-                   * np.exp(- 0.5 * s_ljk * (xik- mu_jk)**2)
-        else:
-            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
-                   * np.exp(- 0.5 * s_rjk * (xik- mu_jk)**2)
-    return y_k
-
-
-def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, G=1, size=15):
+def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, size=25):
     """
-    estimates the integral, eq 17 (Rasmussen 2000)
+    estimates the integral
     """
-    size = 25
     N, D = X.shape
     temp = np.zeros(len(X))
     i = 0
@@ -278,12 +240,14 @@ def log_p_beta(beta, M, cumculative_sum_equation=1):
         + 0.5*(beta*M-3)*np.log(beta/2) \
         + 0.5*beta*cumculative_sum_equation
 
+
 def log_p_beta_prime(beta, M, cumculative_sum_equation=1):
     return -M*special.psi(0.5*beta) \
         + 0.5/beta**2 \
         + 0.5*M*np.log(0.5*beta) \
         + (M*beta -3)/beta \
         + 0.5*cumculative_sum_equation
+
 
 def draw_beta_ars(w, s, M, k, size=1):
     D = 2
@@ -296,8 +260,6 @@ def draw_beta_ars(w, s, M, k, size=1):
     ars = ARS(log_p_beta, log_p_beta_prime, xi=[lb + 15], lb=lb, ub=float("inf"), \
              M=M, cumculative_sum_equation=cumculative_sum_equation)
     return ars.draw(size)
-
-
 
 
 def draw_alpha(k, N, size=1):
@@ -325,9 +287,6 @@ def draw_indicator(pvec):
         except:                 # if no solution (must have been all zeros)
             res[j] = np.random.randint(0, pvec.shape[0]) # pick uniformly
     return res
-
-
-
 
 
 def draw_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr, N, M, D):
