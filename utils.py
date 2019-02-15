@@ -235,27 +235,30 @@ def log_p_alpha_prime(alpha, k, N):
 
 
 def log_p_beta(beta, M, cumculative_sum_equation=1):
-    return -M*special.gammaln(beta/2) \
+    return -2*M*special.gammaln(beta/2) \
         - 0.5/beta \
-        + 0.5*(beta*M-3)*np.log(beta/2) \
+        + (beta*M-1.5)*np.log(beta/2) \
         + 0.5*beta*cumculative_sum_equation
 
 
 def log_p_beta_prime(beta, M, cumculative_sum_equation=1):
-    return -M*special.psi(0.5*beta) \
+    return -2*M*special.psi(0.5*beta) \
         + 0.5/beta**2 \
-        + 0.5*M*np.log(0.5*beta) \
-        + (M*beta -3)/beta \
+        + M*np.log(0.5*beta) \
+        + (2*M*beta -3)/beta \
         + 0.5*cumculative_sum_equation
 
 
-def draw_beta_ars(w, s, M, k, size=1):
+def draw_beta_ars(w, s, s_irr, M, k, size=1):
     D = 2
     cumculative_sum_equation = 0
     for sj in s:
         cumculative_sum_equation += np.log(sj[k])
         cumculative_sum_equation += np.log(w[k])
         cumculative_sum_equation -= w[k]*sj[k]
+    for sj_irr in s_irr:
+        cumculative_sum_equation += np.log(sj_irr[k])
+        cumculative_sum_equation -= w[k]*sj_irr[k]
     lb = D
     ars = ARS(log_p_beta, log_p_beta_prime, xi=[lb + 15], lb=lb, ub=float("inf"), \
              M=M, cumculative_sum_equation=cumculative_sum_equation)

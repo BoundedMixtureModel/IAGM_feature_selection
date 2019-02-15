@@ -188,11 +188,11 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
                 s_r_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
                                 beta_r, w_r, 1-z, j, k, Xj)
 
-        # compute the unrepresented probability - apply simulated annealing, eq 17 (Rasmussen 2000)
+        # compute the unrepresented probability
         p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )
         p_indicators_prior = np.outer(np.ones(M + 1), p_unrep)
 
-        # for the represented components, eq 17 (Rasmussen 2000)
+        # for the represented components
         for j in range(M):
             # n-i,j : the number of oberservations, excluding Xi, that are associated with component j
             nij = n[j] - (c == j).astype(int)
@@ -211,18 +211,17 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
         # stochastic indicator (we could have a new component)
         c = np.hstack(draw_indicator(p_indicators_prior))
 
-        # draw w from posterior (depends on k, beta, D, sj), eq 9 (Rasmussen 2000)
-        w_l = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_l[k]+1),\
-                        2/(vary[k] + beta_l[k] * np.sum(s_l, axis=0)[k])))\
-                        for k in range(D)])
-        w_r = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_r[k]+1),\
-                        2/(vary[k] + beta_r[k] * np.sum(s_r, axis=0)[k])))\
-                        for k in range(D)])
+        # draw w from posterior
+        w_l = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_l[k]+1),\
+                        2/(vary[k] + beta_l[k]*np.sum(s_l, axis=0)[k] + beta_l[k]*np.sum(s_l_irr, axis=0)[k]
+                        ))) for k in range(D)])
+        w_r = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_r[k]+1),\
+                        2/(vary[k] + beta_r[k]*np.sum(s_r, axis=0)[k] + beta_r[k]*np.sum(s_r_irr, axis=0)[k]
+                        ))) for k in range(D)])
 
-        # draw beta from posterior (depends on M, s, w), eq 9 (Rasmussen 2000)
-        # Because its not standard form, using ARS to sampling.
-        beta_l = np.array([draw_beta_ars(w_l, s_l, M, k)[0] for k in range(D)])
-        beta_r = np.array([draw_beta_ars(w_l, s_l, M, k)[0] for k in range(D)])
+        # draw beta from posterior. Because its not standard form, using ARS to sampling.
+        beta_l = np.array([draw_beta_ars(w_l, s_l, s_l_irr, M, k)[0] for k in range(D)])
+        beta_r = np.array([draw_beta_ars(w_l, s_r, s_r_irr, M, k)[0] for k in range(D)])
 
         # sort out based on new stochastic indicators
         nij = np.sum(c == M)        # see if the *new* component has occupancy
