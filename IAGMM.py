@@ -126,7 +126,6 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
     # loop over samples
     iter = 1
     oldpcnt = 0
-    total_time = 0
     while iter < Nsamples:
         # recompute muy and covy
         muy = np.mean(X, axis=0)
@@ -145,55 +144,48 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
             for k in range(D):
                 log_likelihood[j, k] = get_log_likelihood(x, mu, s_l, s_r, z, mu_irr, s_l_irr, s_r_irr, j, k)
             j += 1
-        print(log_likelihood)
-        print(type(log_likelihood[0][0]))
 
         mu_cache = mu
         mu = np.zeros((M, D))
         mu_irr_cache = mu_irr
         mu_irr = np.zeros((M, D))
         j = 0
-        # draw muj from posterior
+        # draw mu and mu_irr from posterior
         for x, nj in zip(Xj, n):
             x = x[0]
             # for every dimensionality, compute the posterior distribution of mu_jk
             for k in range(D):
-                import  datetime
-                a  = datetime.datetime.now()
-                mu[j, k] = MH_mu_jk(mu_cache[j, k], s_l[j, k], s_r[j, k],
-                         r, lam, z, j, k, x)
-                print(mu[j, k ])
-                print(datetime.datetime.now() - a)
-                # mu_irr[j, k] = MH_mu_jk(mu_irr_cache[j, k], s_l_irr[j, k],
-                #          s_r_irr[j, k], r, lam, 1-z, j, k, x)
+                mu[j, k] = MH_mu_jk(mu_cache[j, k], s_l[j, k], s_r[j, k], r, lam, z, j, k, x)
+                mu_irr[j, k] = MH_mu_jk(mu_irr_cache[j, k], s_l_irr[j, k],s_r_irr[j, k], r, lam, 1-z, j, k, x)
             j += 1
         print(mu)
         print(mu_irr)
-        time.sleep(100)
-        # draw lambda from posterior (depends on mu, M, and r), eq 5 (Rasmussen 2000)
+
+        # draw lambda from posterior
         mu_sum = np.sum(mu, axis=0)
+        mu_irr_sum = np.sum(mu_irr, axis=0)
         loc_n = np.zeros(D)
         scale_n = np.zeros(D)
         for k in range(D):
-            scale = 1 / (precisiony[k] + M * r[k])
+            scale = 1 / (precisiony[k] + 2 * M * r[k])
             scale_n[k] = scale
-            loc = scale * (muy[k] * precisiony[k] + r[k] * mu_sum[k])
-            loc_n[k] = loc
-            # lam[k] = draw_normal(loc=loc, scale=scale)
+            loc_n[k] = scale * (muy[k] * precisiony[k] + r[k] * (mu_sum[k] + mu_irr_sum[k]))
         lam = draw_MVNormal(loc_n, scale_n)
 
-        # draw r from posterior (depnds on M, mu, and lambda), eq 5 (Rasmussen 2000)
+        # draw r from posterior
         temp_para_sum = np.zeros(D)
         for k in range(D):
             for muj in mu:
                 temp_para_sum[k] += np.outer((muj[k] - lam[k]), np.transpose(muj[k] - lam[k]))
-        r = np.array([np.squeeze(draw_gamma((M+1)/2, 2/(vary[k] + temp_para_sum[k]))) for k in range(D)])
+            for muj_irr in mu_irr:
+                temp_para_sum[k] += np.outer((muj_irr[k] - lam[k]), np.transpose(muj_irr[k] - lam[k]))
+        r = np.array([np.squeeze(draw_gamma((2*M+1)/2, 2/(vary[k] + temp_para_sum[k]))) for k in range(D)])
+        print(r)
+        time.sleep(100)
 
-        # draw alpha from posterior (depends on number of components M, number of observations N), eq 15 (Rasmussen 2000)
-        # Because its not standard form, using ARS to sampling
+        # draw alpha from posterior. Because its not standard form, using ARS to sampling
         alpha = draw_alpha(M, N)
 
-        t = time.time()
         # draw sj from posterior (depends on mu, c, beta, w), eq 8 (Rasmussen 2000)
         for j, nj in enumerate(n):
             Xj = X[np.where(c == j), :][0]
@@ -216,9 +208,6 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
                                                 nj=nj, beta=beta_l[k], w=w_l[k], sum=cumculative_sum_left_equation)
                 s_r[j][k] = Metropolis_Hastings_Sampling_posterior_srjk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
                                                 nj=nj, beta=beta_r[k], w=w_r[k], sum=cumculative_sum_right_equation)
-        use_time = time.time() - t
-        print("{}: time to complete main analysis = {} sec".format(time.asctime(), use_time))
-        total_time += use_time
 
         # compute the unrepresented probability - apply simulated annealing, eq 17 (Rasmussen 2000)
         p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )

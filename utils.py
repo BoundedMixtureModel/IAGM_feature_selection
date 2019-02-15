@@ -345,5 +345,5 @@ def draw_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr, N, M, D):
                 rel_result = rho[j, k] * AGD_pdf(X[i, k], mu[j, k], s_l[j, k], s_r[j, k])
                 irr_result = (1 - rho[j, k]) * AGD_pdf(X[i, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k])
                 z[i, j, k] = (Z_ij_posteriors[i, j] * rel_result) /(rel_result + irr_result)
-    print(z)
+    # print(z)
     return z
