@@ -133,9 +133,9 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
         for k in range(D):
             vary[k] = np.var(X[:, k])
         precisiony = 1/vary
+
         z = draw_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr, N, M, D)
         log_likelihood = np.zeros((M, D), dtype=mpmath.mpf)
-
         # the observations belonged to class j
         Xj = [X[np.where(c==j), :] for j, nj in enumerate(n)]
         j = 0
@@ -143,9 +143,7 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
         for x, nj in zip(Xj, n):
             x = x[0]
             for k in range(D):
-                for i, x_i in enumerate(x):
-                    log_likelihood[j, k] += z[i, j, k]*mpmath.log(AGD_pdf(x_i[k], mu[j, k], s_l[j, k], s_r[j, k])) + \
-                                (1-z[i, j, k])*mpmath.log(AGD_pdf(x_i[k], mu_irr[j, k], s_l_irr[j, k],s_r_irr[j, k]))
+                log_likelihood[j, k] = get_log_likelihood(x, mu, s_l, s_r, z, mu_irr, s_l_irr, s_r_irr, j, k)
             j += 1
         print(log_likelihood)
         print(type(log_likelihood[0][0]))
@@ -160,14 +158,18 @@ def infinte_mixutre_model(X, Nsamples=500, Nint=50, anneal=False):
             x = x[0]
             # for every dimensionality, compute the posterior distribution of mu_jk
             for k in range(D):
-                mu[j, k] = Metropolis_Hastings_Sampling_posterior_mu_jk(mu_cache[j, k], s_l[j, k], s_r[j, k],
+                import  datetime
+                a  = datetime.datetime.now()
+                mu[j, k] = MH_mu_jk(mu_cache[j, k], s_l[j, k], s_r[j, k],
                          r, lam, z, j, k, x)
-                mu_irr[j, k] = Metropolis_Hastings_Sampling_posterior_mu_jk(mu_irr_cache[j, k], s_l_irr[j, k],
-                         s_r_irr[j, k], r, lam, 1-z, j, k, x)
+                print(mu[j, k ])
+                print(datetime.datetime.now() - a)
+                # mu_irr[j, k] = MH_mu_jk(mu_irr_cache[j, k], s_l_irr[j, k],
+                #          s_r_irr[j, k], r, lam, 1-z, j, k, x)
             j += 1
         print(mu)
         print(mu_irr)
-
+        time.sleep(100)
         # draw lambda from posterior (depends on mu, M, and r), eq 5 (Rasmussen 2000)
         mu_sum = np.sum(mu, axis=0)
         loc_n = np.zeros(D)

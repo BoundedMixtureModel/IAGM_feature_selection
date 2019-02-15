@@ -53,16 +53,17 @@ def draw_MVNormal(mean=0, cov=1, size=1):
     return mv_norm.rvs(mean=mean, cov=cov, size=size)
 
 
+@jit(nogil=True,)
 def AGD_pdf(x_k, mu, s_l, s_r):
     '''
     Asymmetric Gassuian distribution pdf
     '''
     if x_k < mu:
-        return mpmath.sqrt(2 / mpmath.pi) / (mpmath.power(s_l, -0.5) + mpmath.power(s_r, -0.5)) \
-               * mpmath.exp(- 0.5 * s_l * (x_k - mu) ** 2)
+        return np.sqrt(2 / np.pi) / (np.power(s_l, -0.5) + np.power(s_r, -0.5)) \
+               * np.exp(- 0.5 * s_l * (x_k - mu) ** 2)
     else:
-        return mpmath.sqrt(2 / mpmath.pi) / (mpmath.power(s_l, -0.5) + mpmath.power(s_r, -0.5)) \
-               * mpmath.exp(- 0.5 * s_r * (x_k - mu) ** 2)
+        return np.sqrt(2 / np.pi) / (np.power(s_l, -0.5) + np.power(s_r, -0.5)) \
+               * np.exp(- 0.5 * s_r * (x_k - mu) ** 2)
 
 
 def AGD_pdf_feature_selction(x, j, D, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr):
@@ -75,6 +76,12 @@ def AGD_pdf_feature_selction(x, j, D, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_ir
               AGD_pdf(x[k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k]))
     return y
 
+def get_log_likelihood(x, mu, s_l, s_r, z, mu_irr, s_l_irr, s_r_irr, j, k):
+    log_likelihood = mpmath.mpf(0.0)
+    for i, x_i in enumerate(x):
+        log_likelihood += z[i, j, k] * mpmath.log(AGD_pdf(x_i[k], mu[j, k], s_l[j, k], s_r[j, k])) + \
+                                (1 - z[i, j, k]) * mpmath.log(AGD_pdf(x_i[k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k]))
+    return np.float64(log_likelihood)
 
 def compare_mu_jk(mu_jk, previous_mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
     '''
@@ -106,6 +113,45 @@ def Metropolis_Hastings_Sampling_posterior_mu_jk(mu_jk, s_ljk, s_rjk, r, lam, z,
             x = candidate
             vec.append(x)
     return vec[-1]
+
+
+
+
+def c_jk(mu_jk, previous_mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
+    '''
+    compare candiate with previous parameter
+    when sampling mu_jk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
+    '''
+    compared_log_likelihood = 0
+    for i, x_i in enumerate(X):
+        compared_log_likelihood += z[i, j, k] * (np.log(AGD_pdf(x_i[k], mu_jk, s_ljk, s_rjk))- \
+                                                 np.log(AGD_pdf(x_i[k], previous_mu_jk, s_ljk, s_rjk)))
+    likelihood_ratio = np.exp(compared_log_likelihood)
+    prior = draw_normal(loc=lam[k], scale=1/r[k])[0] / draw_normal(loc=lam[k], scale=1/r[k])[0]
+    return likelihood_ratio * prior
+
+
+def MH_mu_jk(mu_jk, s_ljk, s_rjk, r, lam, z, j, k, X):
+    '''
+    Metropolis Hastings sampling for the postiors of mu_jk parameter
+    '''
+    n = 750
+    x = mu_jk
+    vec = []
+    vec.append(x)
+    for i in range(n):
+        candidate = norm.rvs(x, 0.75, 1)[0]
+        # acceptance probability
+        alpha = min([1., c_jk(candidate, x, s_ljk, s_rjk, r, lam, z, j, k, X)])
+        u = np.random.uniform(0,1)
+        if u < alpha:
+            x = candidate
+            vec.append(x)
+    return vec[-1]
+
+
+
+
 
 
 def compare_s_ljk(s_ljk, previous_s_ljk, s_rjk, nj, beta, w, sum):
