@@ -1,6 +1,7 @@
 import sys
 import numpy as np
-from scipy.stats import gamma, invgamma, wishart, norm
+from scipy.stats import gamma, invgamma, wishart, norm, bernoulli
+from scipy.stats import beta as beta_dist
 from scipy.stats import multivariate_normal as mv_norm
 from scipy import special
 from ars import ARS
@@ -53,19 +54,39 @@ def draw_MVNormal(mean=0, cov=1, size=1):
     return mv_norm.rvs(mean=mean, cov=cov, size=size)
 
 
+def draw_Bernoulli(p):
+    '''
+    returns Bernoulli distributed samples
+    '''
+    return bernoulli.rvs(p)
+
+
+def draw_Beta_dist(delta_a, delta_b):
+    '''
+    returns Bernoulli distributed samples
+    '''
+    return beta_dist.rvs(delta_a, delta_b)
+
+
 @jit(nogil=True,)
-def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk):
+def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk, mu_jk_irr, s_ljk_irr, s_rjk_irr, rho):
     '''
     Asymmetric Gassuian distribution pdf for all observations
     '''
     y_k = np.zeros(x_k.shape[0])
     for i, xik in enumerate(x_k):
         if xik < mu_jk:
-            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+            y_k[i] += rho * np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
                    * np.exp(- 0.5 * s_ljk * (xik- mu_jk)**2)
         else:
-            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+            y_k[i] += rho * np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
                    * np.exp(- 0.5 * s_rjk * (xik- mu_jk)**2)
+        if xik < mu_jk_irr:
+            y_k[i] += (1 - rho) * np.sqrt(2/np.pi)/(np.power(s_ljk_irr, -0.5) + np.power(s_rjk_irr, -0.5))\
+                   * np.exp(- 0.5 * s_ljk_irr * (xik- mu_jk_irr)**2)
+        else:
+            y_k[i] += (1 - rho) * np.sqrt(2/np.pi)/(np.power(s_ljk_irr, -0.5) + np.power(s_rjk_irr, -0.5))\
+                   * np.exp(- 0.5 * s_rjk_irr * (xik- mu_jk_irr)**2)
     return y_k
 
 
@@ -196,7 +217,77 @@ def MH_Sampling_posterior_srjk(mu_jk, s_ljk, s_rjk, beta, w, z, j, k, X):
     return vec[-1]
 
 
-def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, size=25):
+def compare_delta_a(delta_a, previous_delta_a, delta_b, rho, k, M):
+    '''
+    compare candiate with previous parameter
+    when sampling s_rjk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
+    '''
+    compared_log_likelihood = M * (special.gammaln(delta_a + delta_b) - special.gammaln(delta_a) -
+                        special.gammaln(previous_delta_a + delta_b) + special.gammaln(previous_delta_a))
+    for j in range(M):
+        compared_log_likelihood += (delta_a - previous_delta_a) * np.log(rho[j, k])
+    likelihood_ratio = np.exp(compared_log_likelihood)
+    prior = draw_gamma(2, 0.5)[0] / draw_gamma(2, 0.5)[0]
+    return likelihood_ratio * prior
+
+
+def MH_Sampling_posterior_delta_a(delta_a, delta_b, rho, k, M):
+    '''
+    Metropolis Hastings sampling for the postiors of delta_a parameter
+    '''
+    n = 750
+    x = delta_a
+    vec = []
+    vec.append(x)
+    for i in range(n):
+        candidate = norm.rvs(x, 0.75, 1)[0]
+        if candidate <= 0:
+            continue
+        # acceptance probability
+        alpha = min([1., compare_delta_a(candidate, x, delta_b, rho, k, M)])
+        u = np.random.uniform(0,1)
+        if u < alpha:
+            x = candidate
+            vec.append(x)
+    return vec[-1]
+
+
+def compare_delta_b(delta_b, previous_delta_b, delta_a, rho, k, M):
+    '''
+    compare candiate with previous parameter
+    when sampling s_rjk, we use z[i,j,k] but (1 - z[i,j,k] for irrelevant feature.
+    '''
+    compared_log_likelihood = M * (special.gammaln(delta_a + delta_b) - special.gammaln(delta_b) -
+                        special.gammaln(delta_a + previous_delta_b) + special.gammaln(previous_delta_b))
+    for j in range(M):
+        compared_log_likelihood += (delta_b - previous_delta_b) * np.log(1-rho[j, k])
+    likelihood_ratio = np.exp(compared_log_likelihood)
+    prior = draw_gamma(2, 0.5)[0] / draw_gamma(2, 0.5)[0]
+    return likelihood_ratio * prior
+
+
+def MH_Sampling_posterior_delta_b(delta_a, delta_b, rho, k, M):
+    '''
+    Metropolis Hastings sampling for the postiors of delta_a parameter
+    '''
+    n = 750
+    x = delta_b
+    vec = []
+    vec.append(x)
+    for i in range(n):
+        candidate = norm.rvs(x, 0.75, 1)[0]
+        if candidate <= 0:
+            continue
+        # acceptance probability
+        alpha = min([1., compare_delta_b(candidate, x, delta_a, rho, k, M)])
+        u = np.random.uniform(0,1)
+        if u < alpha:
+            x = candidate
+            vec.append(x)
+    return vec[-1]
+
+
+def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b, size=20):
     """
     estimates the integral
     """
@@ -208,12 +299,17 @@ def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, size=25):
         mu = draw_MVNormal(mean=lam, cov=1/r)
         s_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
         s_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
+        mu_irr = draw_MVNormal(mean=lam, cov=1/r)
+        s_l_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
+        s_r_irr = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
+        rho = draw_Beta_dist(delta_a, delta_b)
         ini = np.ones(len(X))
         for k in range(D):
             # use metropolis-hastings algorithm to draw sampling from AGD
             # the size parameter is the required sampling number which is equal to the dataset's number
             # the n parameter is MH algorithm itering times,because the acceptance rate should be 25%-40%
-            temp_para = Asymmetric_Gassian_Distribution_pdf(X[:, k], mu[k], s_l[k], s_r[k])
+            temp_para = Asymmetric_Gassian_Distribution_pdf(X[:, k], mu[k], s_l[k], s_r[k], mu_irr[k],
+                                                            s_l_irr[k], s_r_irr[k], rho[k])
             ini *= temp_para
         temp += ini
         i += 1
@@ -249,6 +345,15 @@ def log_p_beta_prime(beta, M, cumculative_sum_equation=1):
         + 0.5*cumculative_sum_equation
 
 
+def draw_alpha(k, N, size=1):
+    """
+    draw alpha from posterior (depends on k, N), eq 15 (Rasmussen 2000), using ARS
+    Make it robust with an expanding range in case of failure
+    """
+    ars = ARS(log_p_alpha, log_p_alpha_prime, xi=[0.1, 5], lb=0, ub=np.inf, k=k, N=N)
+    return ars.draw(size)
+
+
 def draw_beta_ars(w, s, s_irr, M, k, size=1):
     D = 2
     cumculative_sum_equation = 0
@@ -264,14 +369,6 @@ def draw_beta_ars(w, s, s_irr, M, k, size=1):
              M=M, cumculative_sum_equation=cumculative_sum_equation)
     return ars.draw(size)
 
-
-def draw_alpha(k, N, size=1):
-    """
-    draw alpha from posterior (depends on k, N), eq 15 (Rasmussen 2000), using ARS
-    Make it robust with an expanding range in case of failure
-    """
-    ars = ARS(log_p_alpha, log_p_alpha_prime, xi=[0.1, 5], lb=0, ub=np.inf, k=k, N=N)
-    return ars.draw(size)
 
 
 def draw_indicator(pvec):
@@ -292,20 +389,21 @@ def draw_indicator(pvec):
     return res
 
 
-def draw_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr, N, M, D):
+def draw_posterior_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr, N, M, D):
     Z_ij = np.zeros((N, M), dtype=mpmath.mpf)
     Z_i = np.zeros(N, dtype=mpmath.mpf)
     Z_ij_posteriors = np.zeros((N, M), dtype=mpmath.mpf)
-    z = np.zeros((N, 1, D))
+    posterior_z = np.zeros((N, M, D))
     for i in range(N):
         for j in range(M):
-            Z_ij[i, j] = pi[j] * AGD_pdf_feature_selction(X[i], j, D, rho, mu, s_l, s_r, mu_irr, s_l_irr,
-                                                             s_r_irr)
-            Z_i[i] = np.sum(Z_ij[i])
-            Z_ij_posteriors[i] = Z_ij[i] / Z_i[i]
+            Z_ij_posteriors[i] = pi[j] * AGD_pdf_feature_selction(X[i], j, D, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr)
+            # Z_ij[i, j] = pi[j] * AGD_pdf_feature_selction(X[i], j, D, rho, mu, s_l, s_r, mu_irr, s_l_irr, s_r_irr)
+        # Z_i[i] = np.sum(Z_ij[i])
+        # Z_ij_posteriors[i] = Z_ij[i] / Z_i[i]
+    for i in range(N):
+        for j in range(M):
             for k in range(D):
-                rel_result = rho[j, k] * AGD_pdf(X[i, k], mu[j, k], s_l[j, k], s_r[j, k])
-                irr_result = (1 - rho[j, k]) * AGD_pdf(X[i, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k])
-                z[i, j, k] = (Z_ij_posteriors[i, j] * rel_result) /(rel_result + irr_result)
-    # print(z)
-    return z
+                # rele_result = rho[j, k] * AGD_pdf(X[i, k], mu[j, k], s_l[j, k], s_r[j, k])
+                # irr_result = (1 - rho[j, k]) * AGD_pdf(X[i, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k])
+                posterior_z[i, j, k] = rho[j, k] * AGD_pdf(X[i, k], mu[j, k], s_l[j, k], s_r[j, k]) * Z_ij_posteriors[i, j]
+    return posterior_z
