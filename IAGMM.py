@@ -3,7 +3,7 @@ import copy
 import mpmath
 import numpy as np
 from utils import *
-
+from scipy import stats
 
 class Sample:
     """Class for defining a single sample"""
@@ -119,10 +119,10 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             x = x[0]
             # for every dimensionality, compute the posterior distribution of mu_jk
             for k in range(D):
-                mu[j, k] = MH_Sampling_posterior_mu_jk(mu[j, k], s_l[j, k], s_r[j, k], r, lam, posterior_z,
-                                                    j, k, x)
-                mu_irr[j, k] = MH_Sampling_posterior_mu_jk(mu_irr[j, k], s_l_irr[j, k],s_r_irr[j, k],
-                                                    r, lam, 1-posterior_z, j, k, x)
+                mu[j, k] = MH_Sampling_posterior_mu_jk(mu[j, k], s_l[j, k], s_r[j, k], mu_irr[j, k], s_l_irr[j, k],s_r_irr[j, k],
+                                                       r, lam, posterior_z, j, k, x)
+                mu_irr[j, k] = MH_Sampling_posterior_mu_jk(mu_irr[j, k], s_l_irr[j, k],s_r_irr[j, k], mu[j, k], s_l[j, k], s_r[j, k],
+                                                           r, lam, 1-posterior_z, j, k, x)
             j += 1
 
         # draw lambda from posterior
@@ -152,18 +152,19 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
         for j, nj in enumerate(n):
             Xj = X[np.where(c == j), :][0]
             for k in range(D):
-                s_l[j, k] = MH_Sampling_posterior_sljk(mu[j, k], s_l[j, k], s_r[j, k],
+                s_l[j, k] = MH_Sampling_posterior_sljk(mu[j, k], s_l[j, k], s_r[j, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
                                 beta_l, w_l, posterior_z, j, k, Xj)
-                s_l_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
+                s_l_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k], mu[j, k], s_l[j, k], s_r[j, k],
                                 beta_l, w_l, 1-posterior_z, j, k, Xj)
-                s_r[j, k] = MH_Sampling_posterior_srjk(mu[j, k], s_l[j, k], s_r[j, k],
+                s_r[j, k] = MH_Sampling_posterior_srjk(mu[j, k], s_l[j, k], s_r[j, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
                                 beta_r, w_r, posterior_z, j, k, Xj)
-                s_r_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
+                s_r_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k], mu[j, k], s_l[j, k], s_r[j, k],
                                 beta_r, w_r, 1-posterior_z, j, k, Xj)
 
         # compute the unrepresented probability
-        p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r,
-                                                                delta_a, delta_b)
+        # p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r,
+        #                                                         delta_a, delta_b)
+        p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )
         p_indicators_prior = np.outer(np.ones(M + 1), p_unrep)
 
         # for the represented components
@@ -173,26 +174,46 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             idx = np.argwhere(nij > 0)
             idx = idx.reshape(idx.shape[0])
             likelihood_for_associated_data = np.ones(len(idx))
+            # for i in range(len(idx)):
+            #     for k in range(D):
+            #         Y = 0
+            #         if X[i, k] < mu[j, k]:
+            #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j, k], -0.5))* \
+            #                         np.exp(- 0.5 * s_l[j, k] * np.power(X[i, k] - mu[j, k], 2))
+            #         else:
+            #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j][k], -0.5))* \
+            #                         np.exp(- 0.5 * s_r[j, k] * np.power(X[i, k] - mu[j, k], 2))
+            #         if X[i, k] < mu_irr[j, k]:
+            #             Y += (1 - rho[j, k]) / (np.power(s_l_irr[j, k], -0.5) + np.power(s_r_irr[j, k], -0.5)) \
+            #                       * np.exp(- 0.5 * s_l_irr[j, k] * (X[i, k] - mu_irr[j, k]) ** 2)
+            #         else:
+            #             Y += (1 - rho[j, k]) / (np.power(s_l_irr[j, k], -0.5) + np.power(s_r_irr[j, k], -0.5)) \
+            #                       * np.exp(- 0.5 * s_r_irr[j, k] * (X[i, k] - mu_irr[j, k]) ** 2)
+            #         likelihood_for_associated_data[i] *= Y
+            # p_indicators_prior[j, idx] = nij[idx] / (N - 1.0 + alpha) * likelihood_for_associated_data
+            likelihood_for_associated_data = np.ones(len(idx))
             for i in range(len(idx)):
                 for k in range(D):
-                    Y = 0
-                    if X[i, k] < mu[j, k]:
-                        Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j, k], -0.5))* \
-                                    np.exp(- 0.5 * s_l[j, k] * np.power(X[i, k] - mu[j, k], 2))
+                    if X[i][k] < mu[j][k]:
+                        likelihood_for_associated_data[i] *= 1 / (np.power(s_l[j][k], -0.5) + np.power(s_r[j][k], -0.5))* \
+                                    np.exp(- 0.5 * s_l[j][k] * np.power(X[i][k] - mu[j][k], 2))
                     else:
-                        Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j][k], -0.5))* \
-                                    np.exp(- 0.5 * s_r[j, k] * np.power(X[i, k] - mu[j, k], 2))
-                    if X[i, k] < mu_irr[j, k]:
-                        Y += (1 - rho[j, k]) / (np.power(s_l_irr[j, k], -0.5) + np.power(s_r_irr[j, k], -0.5)) \
-                                  * np.exp(- 0.5 * s_l_irr[j, k] * (X[i, k] - mu_irr[j, k]) ** 2)
-                    else:
-                        Y += (1 - rho[j, k]) / (np.power(s_l_irr[j, k], -0.5) + np.power(s_r_irr[j, k], -0.5)) \
-                                  * np.exp(- 0.5 * s_r_irr[j, k] * (X[i, k] - mu_irr[j, k]) ** 2)
-                    likelihood_for_associated_data[i] *= Y
-            p_indicators_prior[j, idx] = nij[idx] / (N - 1.0 + alpha) * likelihood_for_associated_data
+                        likelihood_for_associated_data[i] *= 1 / (np.power(s_l[j][k], -0.5) + np.power(s_r[j][k], -0.5))* \
+                                    np.exp(- 0.5 * s_r[j][k] * np.power(X[i][k] - mu[j][k], 2))
+            p_indicators_prior[j, idx] = nij[idx]/(N - 1.0 + alpha)*likelihood_for_associated_data
+        # for j in range(p_indicators_prior.shape[0]):
+        #     p_indicators_prior[j, np.where(p_indicators_prior[j] < 0.00001)] = 0.000001
+        #
+        # print("__")
+        # print(p_indicators_prior)
+        # for j in range(p_indicators_prior.shape[0]):
+        #     if j == 0:
+        #         pass
+        #     else:
+        #         print(np.where(p_indicators_prior[j]>0.00001))
+        # print("__")
         # stochastic indicator (we could have a new component)
         c = np.hstack(draw_indicator(p_indicators_prior))
-
 
         # draw w from posterior
         w_l = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_l[k]+1),\
@@ -227,13 +248,15 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
         nij = np.sum(c == M)        # see if the *new* component has occupancy
         if nij > 0:
             # draw from priors and increment M
-            newmu = np.array([np.squeeze(draw_normal(lam[k], 1 / r[k])) for k in range(D)])
+            # newmu = np.array([np.squeeze(draw_normal(lam[k], 1 / r[k])) for k in range(D)])
+            newmu = draw_MVNormal(lam, 1/r)
             news_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
             news_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
             newmu_irr = np.array([np.squeeze(draw_normal(lam[k], 1 / r[k])) for k in range(D)])
             news_l_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
             news_r_irr = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
-            newrho = draw_Beta_dist(delta_a, delta_b)
+            # newrho = draw_Beta_dist(delta_a, delta_b)
+            newrho = np.array([0.975, 0.975])
             new_z_indicators = np.ones((N, 1, D))
 
             mu = np.concatenate((mu, np.reshape(newmu, (1, D))))
@@ -261,7 +284,8 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             mu_irr = np.delete(mu_irr, badidx, axis=0)
             s_l_irr = np.delete(s_l_irr, badidx, axis=0)
             s_r_irr = np.delete(s_r_irr, badidx, axis=0)
-            z_indicators = np.delete(z_indicators, badidx, axis=0)
+            z_indicators = np.delete(z_indicators, badidx, axis=1)
+
             # if the unrepresented compont removed is in the middle, make the sequential component indicators change
             for cnt, i in enumerate(badidx):
                 idx = np.argwhere(c >= (i - cnt))
