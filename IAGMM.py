@@ -135,9 +135,9 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
                 p = rel_x_k[rel_x_k < mu_cache[j][k]].shape[0]
                 # q represent the number of x_ik >= mu_jk, q = n - p, while z_ik = 1
                 q = rel_x_k[rel_x_k >= mu_cache[j][k]].shape[0]
-                # x_l_sum represents the sum from i to n of x_ik, where x_ik < mu_jk and z_ik = 1
+                # rel_x_l_sum represents the sum from i to n of x_ik, where x_ik < mu_jk and z_ik = 1
                 rel_x_l_sum = np.sum(rel_x_k[rel_x_k < mu_cache[j][k]])
-                # x_r_sum represents the sum from i to n of x_ik, where x_ik >= mu_jk and z_ik = 1
+                # rel_x_r_sum represents the sum from i to n of x_ik, where x_ik >= mu_jk and z_ik = 1
                 rel_x_r_sum = np.sum(rel_x_k[rel_x_k >= mu_cache[j][k]])
                 r_n = r[k] + p * s_l[j, k] + q * s_r[j, k]
                 mu_n = (s_l[j, k] * rel_x_l_sum + s_r[j, k] * rel_x_r_sum + r[k] * lam[k])/r_n
@@ -175,78 +175,81 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
         # draw sj from posterior
         for j, nj in enumerate(n):
             Xj = X[np.where(c == j), :][0]
+            # for every dimensionality, compute the posterior distribution of s_ljk, s_rjk
             for k in range(D):
-                s_l[j, k] = MH_Sampling_posterior_sljk(mu[j, k], s_l[j, k], s_r[j, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
-                                beta_l, w_l, posterior_z, j, k, Xj)
-                s_l_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k], mu[j, k], s_l[j, k], s_r[j, k],
-                                beta_l, w_l, 1-posterior_z, j, k, Xj)
-                s_r[j, k] = MH_Sampling_posterior_srjk(mu[j, k], s_l[j, k], s_r[j, k], mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k],
-                                beta_r, w_r, posterior_z, j, k, Xj)
-                s_r_irr[j, k] = MH_Sampling_posterior_sljk(mu_irr[j, k], s_l_irr[j, k], s_r_irr[j, k], mu[j, k], s_l[j, k], s_r[j, k],
-                                beta_r, w_r, 1-posterior_z, j, k, Xj)
+                x_k = Xj[:, k]
+                rel_x_k = x_k[np.reshape((z_indicators[:, :, k] == 1), (100))]
+                irr_x_k = x_k[np.reshape((z_indicators[:, :, k] == 0), (100))]
+                rel_x_k_num = rel_x_k.shape[0]
+                irr_x_k_num = irr_x_k.shape[0]
+                # rel_x_l represents the data from i to n of x_ik, where x_ik < mu_jk and z_ik = 1
+                rel_x_l = rel_x_k[rel_x_k < mu[j][k]]
+                # rel_x_r represents the data from i to n of x_ik, where x_ik >= mu_jk and z_ik = 1
+                rel_x_r = rel_x_k[rel_x_k >= mu[j][k]]
+                cumculative_sum_left_equation = np.sum((rel_x_l - mu[j][k]) **2)
+                cumculative_sum_right_equation = np.sum((rel_x_r - mu[j][k]) **2)
+                s_l[j][k] = MH_Sampling_posterior_sljk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
+                                                nj=rel_x_k_num, beta=beta_l[k], w=w_l[k], sum=cumculative_sum_left_equation)
+                s_r[j][k] = MH_Sampling_posterior_srjk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
+                                                nj=rel_x_k_num, beta=beta_r[k], w=w_r[k], sum=cumculative_sum_right_equation)
+                ##########################
+                irr_cumculative_sum = np.sum((irr_x_k - mu[j][k]) **2)
+                s_irr[j][k] = draw_gamma(((beta_l[k]+beta_r[k])/2 + irr_x_k_num) / 2,
+                                         2 / ((beta_l[k]+beta_r[k])/2 * (w_l[k]+w_r[k])/2 + irr_cumculative_sum))
 
-        # # draw w from posterior
+
+        ##########################
+        # draw w from posterior
         # w_l = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_l[k]+1),\
         #                 2/(vary[k] + beta_l[k]*np.sum(s_l, axis=0)[k] + beta_l[k]*np.sum(s_l_irr, axis=0)[k]
         #                 ))) for k in range(D)])
         # w_r = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_r[k]+1),\
         #                 2/(vary[k] + beta_r[k]*np.sum(s_r, axis=0)[k] + beta_r[k]*np.sum(s_r_irr, axis=0)[k]
         #                 ))) for k in range(D)])
-        #
+
+        ##########################
         # # draw beta from posterior. Because its not standard form, using ARS to sampling.
         # beta_l = np.array([draw_beta_ars(w_l, s_l, s_l_irr, M, k)[0] for k in range(D)])
         # beta_r = np.array([draw_beta_ars(w_l, s_r, s_r_irr, M, k)[0] for k in range(D)])
 
         # compute the unrepresented probability
         # p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b)
-        # p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )
-        # p_indicators_prior = np.outer(np.ones(M + 1), p_unrep)
+        p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )
+        p_indicators_prior = np.outer(np.ones(M + 1), p_unrep)
 
         # for the represented components
-        # for j in range(M):
-        #     # n-i,j : the number of oberservations, excluding Xi, that are associated with component j
-        #     nij = n[j] - (c == j).astype(int)
-        #     idx = np.argwhere(nij > 0)
-        #     idx = idx.reshape(idx.shape[0])
-        #     likelihood_for_associated_data = np.ones(len(idx))
-        #     # for i in range(len(idx)):
-        #     #     for k in range(D):
-        #     #         Y = 0
-        #     #         if X[i, k] < mu[j, k]:
-        #     #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j, k], -0.5))* \
-        #     #                         np.exp(- 0.5 * s_l[j, k] * np.power(X[i, k] - mu[j, k], 2))
-        #     #         else:
-        #     #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j][k], -0.5))* \
-        #     #                         np.exp(- 0.5 * s_r[j, k] * np.power(X[i, k] - mu[j, k], 2))
-        #     #         if X[i, k] < mu_irr[j, k]:
-        #     #             Y += (1 - rho[j, k]) / (np.power(s_l_irr[j, k], -0.5) + np.power(s_r_irr[j, k], -0.5)) \
-        #     #                       * np.exp(- 0.5 * s_l_irr[j, k] * (X[i, k] - mu_irr[j, k]) ** 2)
-        #     #         else:
-        #     #             Y += (1 - rho[j, k]) / (np.power(s_l_irr[j, k], -0.5) + np.power(s_r_irr[j, k], -0.5)) \
-        #     #                       * np.exp(- 0.5 * s_r_irr[j, k] * (X[i, k] - mu_irr[j, k]) ** 2)
-        #     #         likelihood_for_associated_data[i] *= Y
-        #     # p_indicators_prior[j, idx] = nij[idx] / (N - 1.0 + alpha) * likelihood_for_associated_data
-        #     likelihood_for_associated_data = np.ones(len(idx))
-        #     for i in range(len(idx)):
-        #         for k in range(D):
-        #             if X[i][k] < mu[j][k]:
-        #                 likelihood_for_associated_data[i] *= 1 / (np.power(s_l[j][k], -0.5) + np.power(s_r[j][k], -0.5))* \
-        #                             np.exp(- 0.5 * s_l[j][k] * np.power(X[i][k] - mu[j][k], 2))
-        #             else:
-        #                 likelihood_for_associated_data[i] *= 1 / (np.power(s_l[j][k], -0.5) + np.power(s_r[j][k], -0.5))* \
-        #                             np.exp(- 0.5 * s_r[j][k] * np.power(X[i][k] - mu[j][k], 2))
-        #     p_indicators_prior[j, idx] = nij[idx]/(N - 1.0 + alpha)*likelihood_for_associated_data
-        # for j in range(p_indicators_prior.shape[0]):
-        #     p_indicators_prior[j, np.where(p_indicators_prior[j] < 0.00001)] = 0.000001
-        #
+        for j in range(M):
+            # n-i,j : the number of oberservations, excluding Xi, that are associated with component j
+            nij = n[j] - (c == j).astype(int)
+            idx = np.argwhere(nij > 0)
+            idx = idx.reshape(idx.shape[0])
+            # likelihood_for_associated_data = np.ones(len(idx))
+            # for i in range(len(idx)):
+            #     for k in range(D):
+            #         Y = 0
+            #         if X[i, k] < mu[j, k]:
+            #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j, k], -0.5))* \
+            #                         np.exp(- 0.5 * s_l[j, k] * np.power(X[i, k] - mu[j, k], 2))
+            #         else:
+            #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j][k], -0.5))* \
+            #                         np.exp(- 0.5 * s_r[j, k] * np.power(X[i, k] - mu[j, k], 2))
+            #         Y += (1 - rho[j, k]) * norm.pdf(X[i, k], mu_irr[j, k], s_irr[j, k])
+            #         likelihood_for_associated_data[i] *= Y
+            # p_indicators_prior[j, idx] = nij[idx] / (N - 1.0 + alpha) * likelihood_for_associated_data
+            likelihood_for_associated_data = np.ones(len(idx))
+            for i in range(len(idx)):
+                for k in range(D):
+                    if X[i][k] < mu[j][k]:
+                        likelihood_for_associated_data[i] *= 1 / (np.power(s_l[j][k], -0.5) + np.power(s_r[j][k], -0.5))* \
+                                    np.exp(- 0.5 * s_l[j][k] * np.power(X[i][k] - mu[j][k], 2))
+                    else:
+                        likelihood_for_associated_data[i] *= 1 / (np.power(s_l[j][k], -0.5) + np.power(s_r[j][k], -0.5))* \
+                                    np.exp(- 0.5 * s_r[j][k] * np.power(X[i][k] - mu[j][k], 2))
+            p_indicators_prior[j, idx] = nij[idx]/(N - 1.0 + alpha)*likelihood_for_associated_data
         # stochastic indicator (we could have a new component)
-        # c = np.hstack(draw_indicator(p_indicators_prior))
-        #
-
-
+        c = np.hstack(draw_indicator(p_indicators_prior))
 
         f = np.array([[np.count_nonzero(z_indicators[:, j, k] == 1) for k in range(D)] for j in range(M)])
-
         # draw rho from posterior
         for j in range(M):
             for k in range(D):
@@ -266,8 +269,8 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             news_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
             news_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
             newmu_irr = np.array([np.squeeze(draw_normal(lam[k], 1 / r[k])) for k in range(D)])
-            # news_l_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
-            # news_r_irr = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
+            ##########################
+            news_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
             # newrho = draw_Beta_dist(delta_a, delta_b)
             newrho = np.array([0.975, 0.975])
             new_z_indicators = np.ones((N, 1, D))
@@ -276,8 +279,7 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             s_l = np.concatenate((s_l, np.reshape(news_l, (1, D))))
             s_r = np.concatenate((s_r, np.reshape(news_r, (1, D))))
             mu_irr = np.concatenate((mu_irr, np.reshape(newmu_irr, (1, D))))
-            # s_l_irr = np.concatenate((s_l_irr, np.reshape(news_l_irr, (1, D))))
-            # s_r_irr = np.concatenate((s_r_irr, np.reshape(news_r_irr, (1, D))))
+            s_irr = np.concatenate((s_irr, np.reshape(news_irr, (1, D))))
             rho = np.concatenate((rho, np.reshape(newrho, (1, D))))
             z_indicators = np.concatenate((z_indicators, new_z_indicators), axis=1)
             M = M + 1
@@ -295,8 +297,7 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             s_r = np.delete(s_r, badidx, axis=0)
             rho = np.delete(rho, badidx, axis=0)
             mu_irr = np.delete(mu_irr, badidx, axis=0)
-            # s_l_irr = np.delete(s_l_irr, badidx, axis=0)
-            # s_r_irr = np.delete(s_r_irr, badidx, axis=0)
+            s_irr = np.delete(s_irr, badidx, axis=0)
             z_indicators = np.delete(z_indicators, badidx, axis=1)
 
             # if the unrepresented compont removed is in the middle, make the sequential component indicators change
