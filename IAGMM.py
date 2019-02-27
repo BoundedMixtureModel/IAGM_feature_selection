@@ -8,17 +8,11 @@ from scipy import stats
 
 class Sample:
     """Class for defining a single sample"""
-    def __init__(self, mu, s_l, s_r, pi, lam, r, beta_l, beta_r, w_l, w_r, alpha, M):
+    def __init__(self, mu, s_l, s_r, pi, alpha, M):
         self.mu = mu
         self.s_l = s_l
         self.s_r = s_r
         self.pi = np.reshape(pi, (1, -1))
-        self.lam = lam
-        self.r = r
-        self.beta_l = beta_l
-        self.beta_r = beta_r
-        self.w_l = w_l
-        self.w_r = w_r
         self.M = M
         self.alpha = alpha
 
@@ -80,8 +74,10 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
     # draw parameter from prior
     beta_l = np.array([np.squeeze(draw_invgamma(0.5, 2)) for d in range(D)])
     beta_r = np.array([np.squeeze(draw_invgamma(0.5, 2)) for d in range(D)])
+    beta_irr = np.array([np.squeeze(draw_invgamma(0.5, 2)) for d in range(D)])
     w_l = np.array([np.squeeze(draw_gamma(0.5, 2*vary[k])) for k in range(D)])
     w_r = np.array([np.squeeze(draw_gamma(0.5, 2*vary[k])) for k in range(D)])
+    w_irr = np.array([np.squeeze(draw_gamma(0.5, 2*vary[k])) for k in range(D)])
     s_l[0, :] = np.array([np.squeeze(draw_gamma(beta_l[k]/2, 2/(beta_l[k]*w_l[k]))) for k in range(D)])
     s_r[0, :] = np.array([np.squeeze(draw_gamma(beta_r[k]/2, 2/(beta_r[k]*w_r[k]))) for k in range(D)])
     s_irr[0, :] = np.array([np.squeeze(draw_gamma(beta_r[k]/2, 2/(beta_r[k]*w_r[k]))) for k in range(D)])
@@ -89,12 +85,14 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
     delta_b = np.array([np.squeeze(draw_gamma(2, 0.5)) for k in range(D)])
     lam = draw_MVNormal(mean=muy, cov=vary)
     r = np.array([np.squeeze(draw_gamma(0.5, 2/vary[k])) for k in range(D)])
+    lam_irr = draw_MVNormal(mean=muy, cov=vary)
+    r_irr = np.array([np.squeeze(draw_gamma(0.5, 2/vary[k])) for k in range(D)])
     alpha = 1.0/draw_gamma(0.5, 2.0)
 
     # set only 1 component, m is the component number
     M = 1
     # define the sample
-    S = Sample(mu, s_l, s_r, pi, lam, r, beta_l, beta_r, w_l, w_r, alpha, M)
+    S = Sample(mu, s_l, s_r, pi, alpha, M)
     # add the sample
     Samp.addsample(S)
     print('{}: initialised parameters'.format(time.asctime()))
@@ -116,6 +114,7 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
                 for k in range(D):
                     z_indicators[i, j, k] = draw_Bernoulli(posterior_z[i, j, k])
 
+
         # the observations belonged to class j
         Xj = [X[np.where(c==j), :] for j, nj in enumerate(n)]
         mu_cache = mu
@@ -127,8 +126,8 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             # for every dimensionality, compute the posterior distribution of mu_jk
             for k in range(D):
                 x_k = x[:, k]
-                rel_x_k = x_k[np.reshape((z_indicators[:, :, k] == 1), (100))]
-                irr_x_k = x_k[np.reshape((z_indicators[:, :, k] == 0), (100))]
+                rel_x_k = x_k[np.reshape((z_indicators[:, :, k] == 1), (N))]
+                irr_x_k = x_k[np.reshape((z_indicators[:, :, k] == 0), (N))]
                 rel_x_k_num = rel_x_k.shape[0]
                 irr_x_k_num = irr_x_k.shape[0]
                 # p represent the number of x_ik < mu_jk where z_ik = 1
@@ -144,8 +143,8 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
                 mu[j, k] = draw_normal(mu_n, 1/r_n)
 
                 irr_x_sum = np.sum(irr_x_k[irr_x_k >= mu_cache[j][k]])
-                r_n_irr = r[k] + irr_x_k_num * s_irr[j, k]
-                mu_n_irr = (s_irr[j, k] * irr_x_sum + r[k] * lam[k])/r_n_irr
+                r_n_irr = r_irr[k] + irr_x_k_num * s_irr[j, k]
+                mu_n_irr = (s_irr[j, k] * irr_x_sum + r_irr[k] * lam_irr[k])/r_n_irr
                 mu_irr[j, k] = draw_normal(mu_n_irr, 1/r_n_irr)
             j += 1
 
@@ -154,20 +153,30 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
         mu_irr_sum = np.sum(mu_irr, axis=0)
         loc_n = np.zeros(D)
         scale_n = np.zeros(D)
+        loc_irr_n = np.zeros(D)
+        scale_irr_n = np.zeros(D)
         for k in range(D):
-            scale = 1 / (precisiony[k] + 2 * M * r[k])
+            scale = 1 / (precisiony[k] + M * r[k])
             scale_n[k] = scale
-            loc_n[k] = scale * (muy[k] * precisiony[k] + r[k] * (mu_sum[k] + mu_irr_sum[k]))
+            loc_n[k] = scale * (muy[k] * precisiony[k] + r[k] * mu_sum[k])
         lam = draw_MVNormal(loc_n, scale_n)
+        for k in range(D):
+            scale = 1 / (precisiony[k] + M * r_irr[k])
+            scale_irr_n[k] = scale
+            loc_irr_n[k] = scale * (muy[k] * precisiony[k] + r_irr[k] * mu_irr_sum[k])
+        lam_irr = draw_MVNormal(loc_irr_n, scale_irr_n)
 
         # draw r from posterior
         temp_para_sum = np.zeros(D)
         for k in range(D):
             for muj in mu:
                 temp_para_sum[k] += np.outer((muj[k] - lam[k]), np.transpose(muj[k] - lam[k]))
+        r = np.array([np.squeeze(draw_gamma((M + 1) / 2, 2 / (vary[k] + temp_para_sum[k]))) for k in range(D)])
+        temp_para_sum = np.zeros(D)
+        for k in range(D):
             for muj_irr in mu_irr:
-                temp_para_sum[k] += np.outer((muj_irr[k] - lam[k]), np.transpose(muj_irr[k] - lam[k]))
-        r = np.array([np.squeeze(draw_gamma((2*M+1)/2, 2/(vary[k] + temp_para_sum[k]))) for k in range(D)])
+                temp_para_sum[k] += np.outer((muj_irr[k] - lam_irr[k]), np.transpose(muj_irr[k] - lam_irr[k]))
+        r_irr = np.array([np.squeeze(draw_gamma((M + 1) / 2, 2 / (vary[k] + temp_para_sum[k]))) for k in range(D)])
 
         # draw alpha from posterior. Because its not standard form, using ARS to sampling
         alpha = draw_alpha(M, N)
@@ -178,8 +187,8 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             # for every dimensionality, compute the posterior distribution of s_ljk, s_rjk
             for k in range(D):
                 x_k = Xj[:, k]
-                rel_x_k = x_k[np.reshape((z_indicators[:, :, k] == 1), (100))]
-                irr_x_k = x_k[np.reshape((z_indicators[:, :, k] == 0), (100))]
+                rel_x_k = x_k[np.reshape((z_indicators[:, :, k] == 1), (N))]
+                irr_x_k = x_k[np.reshape((z_indicators[:, :, k] == 0), (N))]
                 rel_x_k_num = rel_x_k.shape[0]
                 irr_x_k_num = irr_x_k.shape[0]
                 # rel_x_l represents the data from i to n of x_ik, where x_ik < mu_jk and z_ik = 1
@@ -188,29 +197,27 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
                 rel_x_r = rel_x_k[rel_x_k >= mu[j][k]]
                 cumculative_sum_left_equation = np.sum((rel_x_l - mu[j][k]) **2)
                 cumculative_sum_right_equation = np.sum((rel_x_r - mu[j][k]) **2)
-                s_l[j][k] = MH_Sampling_posterior_sljk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
-                                                nj=rel_x_k_num, beta=beta_l[k], w=w_l[k], sum=cumculative_sum_left_equation)
-                s_r[j][k] = MH_Sampling_posterior_srjk(s_ljk=s_l[j][k], s_rjk=s_r[j][k],
-                                                nj=rel_x_k_num, beta=beta_r[k], w=w_r[k], sum=cumculative_sum_right_equation)
-                ##########################
+                s_l[j][k] = MH_Sampling_posterior_sljk(s_ljk=s_l[j][k], s_rjk=s_r[j][k], nj=rel_x_k_num, beta=beta_l[k],
+                                                       w=w_l[k], sum=cumculative_sum_left_equation)
+                s_r[j][k] = MH_Sampling_posterior_srjk(s_ljk=s_l[j][k], s_rjk=s_r[j][k], nj=rel_x_k_num, beta=beta_r[k],
+                                                       w=w_r[k], sum=cumculative_sum_right_equation)
                 irr_cumculative_sum = np.sum((irr_x_k - mu[j][k]) **2)
-                s_irr[j][k] = draw_gamma(((beta_l[k]+beta_r[k])/2 + irr_x_k_num) / 2,
-                                         2 / ((beta_l[k]+beta_r[k])/2 * (w_l[k]+w_r[k])/2 + irr_cumculative_sum))
+                s_irr[j][k] = draw_gamma((beta_irr[k] + irr_x_k_num) / 2, 2 / beta_irr[k] * w_irr[k] + irr_cumculative_sum)
 
-
-        ##########################
         # draw w from posterior
-        # w_l = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_l[k]+1),\
-        #                 2/(vary[k] + beta_l[k]*np.sum(s_l, axis=0)[k] + beta_l[k]*np.sum(s_l_irr, axis=0)[k]
-        #                 ))) for k in range(D)])
-        # w_r = np.array([np.squeeze(draw_gamma(0.5 *(2*M*beta_r[k]+1),\
-        #                 2/(vary[k] + beta_r[k]*np.sum(s_r, axis=0)[k] + beta_r[k]*np.sum(s_r_irr, axis=0)[k]
-        #                 ))) for k in range(D)])
+        # vary or precisiony
+        w_l = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_l[k]+1), 2/(precisiony[k] + beta_l[k]*np.sum(s_l, axis=0)[k])))
+                        for k in range(D)])
+        w_r = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_r[k]+1), 2/(precisiony[k] + beta_r[k]*np.sum(s_r, axis=0)[k])))
+                        for k in range(D)])
+        w_irr = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_irr[k]+1), 2/(precisiony[k] + beta_irr[k]*np.sum(s_irr, axis=0)[k])))
+                        for k in range(D)])
 
-        ##########################
-        # # draw beta from posterior. Because its not standard form, using ARS to sampling.
-        # beta_l = np.array([draw_beta_ars(w_l, s_l, s_l_irr, M, k)[0] for k in range(D)])
-        # beta_r = np.array([draw_beta_ars(w_l, s_r, s_r_irr, M, k)[0] for k in range(D)])
+        # draw beta from posterior. Because its not standard form, using ARS to sampling.
+        beta_l = np.array([draw_beta_ars(w_l, s_l, M, k)[0] for k in range(D)])
+        beta_r = np.array([draw_beta_ars(w_r, s_r, M, k)[0] for k in range(D)])
+        beta_irr = np.array([draw_beta_ars(w_irr, s_irr, M, k)[0] for k in range(D)])
+
 
         # compute the unrepresented probability
         # p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b)
@@ -318,7 +325,7 @@ def infinte_mixutre_model(X, Nsamples=100, Nint=50, anneal=False):
             oldpcnt = pcnt
 
         # add sample
-        S = Sample(mu, s_l, s_r, pi, lam, r, beta_l, beta_r, w_l, w_r, alpha, M)
+        S = Sample(mu, s_l, s_r, pi, alpha, M)
         newS = copy.deepcopy(S)
         Samp.addsample(newS)
         iter += 1

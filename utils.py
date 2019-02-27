@@ -187,7 +187,7 @@ def compare_delta_a(delta_a, previous_delta_a, delta_b, rho, k, M):
     for j in range(M):
         compared_log_likelihood += (delta_a - previous_delta_a) * np.log(rho[j, k])
     likelihood_ratio = np.exp(compared_log_likelihood)
-    prior = draw_gamma(2, 0.5)[0] / draw_gamma(2, 0.5)[0]
+    prior = gamma.pdf(delta_a, 2, loc=0, scale=0.5)/ gamma.pdf(previous_delta_a, 2, loc=0, scale=0.5)
     return likelihood_ratio * prior
 
 
@@ -222,7 +222,7 @@ def compare_delta_b(delta_b, previous_delta_b, delta_a, rho, k, M):
     for j in range(M):
         compared_log_likelihood += (delta_b - previous_delta_b) * np.log(1-rho[j, k])
     likelihood_ratio = np.exp(compared_log_likelihood)
-    prior = draw_gamma(2, 0.5)[0] / draw_gamma(2, 0.5)[0]
+    prior = gamma.pdf(delta_b, 2, loc=0, scale=0.5)/ gamma.pdf(previous_delta_b, 2, loc=0, scale=0.5)
     return likelihood_ratio * prior
 
 
@@ -247,62 +247,24 @@ def MH_Sampling_posterior_delta_b(delta_a, delta_b, rho, k, M):
     return vec[-1]
 
 
-# @jit(nogil=True,)
-# def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk):
-#     y_k = np.zeros(x_k.shape[0])
-#     for i, xik in enumerate(x_k):
-#         if xik < mu_jk:
-#             y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
-#                    * np.exp(- 0.5 * s_ljk * (xik- mu_jk)**2)
-#         else:
-#             y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
-#                    * np.exp(- 0.5 * s_rjk * (xik- mu_jk)**2)
-#     return y_k
-#
-#
-# def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, size=15):
-#     """
-#     estimates the integral, eq 17 (Rasmussen 2000)
-#     """
-#     size = 15
-#     N, D = X.shape
-#     temp = np.zeros(len(X))
-#     i = 0
-#     while i < size:
-#         # mu = np.array([np.squeeze(norm.rvs(loc=lam[k], scale=1/r[k], size=1)) for k in range(D)])
-#         mu = draw_MVNormal(mean=lam, cov=1/r)
-#         s_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
-#         s_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
-#         ini = np.ones(len(X))
-#         for k in range(D):
-#             temp_para = Asymmetric_Gassian_Distribution_pdf(X[:, k], mu[k], s_l[k], s_r[k])
-#             ini *= temp_para
-#         temp += ini
-#         i += 1
-#     return temp/float(size)
-
-
 @jit(nogil=True,)
-def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk, mu_irr_jk, s_irr_jk, rho):
-    '''
-    Asymmetric Gassuian distribution pdf for all observations
-    '''
+def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk):
     y_k = np.zeros(x_k.shape[0])
     for i, xik in enumerate(x_k):
         if xik < mu_jk:
-            y_k[i] += rho * np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
-                   * np.exp(- 0.5 * s_ljk * (xik - mu_jk)**2)
+            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+                   * np.exp(- 0.5 * s_ljk * (xik- mu_jk)**2)
         else:
-            y_k[i] += rho * np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
-                   * np.exp(- 0.5 * s_rjk * (xik - mu_jk)**2)
-        y_k[i] += (1 - rho) * norm.pdf(xik, mu_irr_jk, s_irr_jk)
+            y_k[i] = np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+                   * np.exp(- 0.5 * s_rjk * (xik- mu_jk)**2)
     return y_k
 
 
-def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b, size=20):
+def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, size=15):
     """
-    estimates the integral
+    estimates the integral, eq 17 (Rasmussen 2000)
     """
+    size = 15
     N, D = X.shape
     temp = np.zeros(len(X))
     i = 0
@@ -311,17 +273,55 @@ def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b, size=
         mu = draw_MVNormal(mean=lam, cov=1/r)
         s_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
         s_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
-        mu_irr = draw_MVNormal(mean=lam, cov=1/r)
-        #######################
-        s_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
-        rho = draw_Beta_dist(delta_a, delta_b)
         ini = np.ones(len(X))
         for k in range(D):
-            temp_para = Asymmetric_Gassian_Distribution_pdf(X[:, k], mu[k], s_l[k], s_r[k], mu_irr[k], s_irr[k], rho[k])
+            temp_para = Asymmetric_Gassian_Distribution_pdf(X[:, k], mu[k], s_l[k], s_r[k])
             ini *= temp_para
         temp += ini
         i += 1
-    return temp / float(size)
+    return temp/float(size)
+
+
+# @jit(nogil=True,)
+# def Asymmetric_Gassian_Distribution_pdf(x_k, mu_jk, s_ljk, s_rjk, mu_irr_jk, s_irr_jk, rho):
+#     '''
+#     Asymmetric Gassuian distribution pdf for all observations
+#     '''
+#     y_k = np.zeros(x_k.shape[0])
+#     for i, xik in enumerate(x_k):
+#         if xik < mu_jk:
+#             y_k[i] += rho * np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+#                    * np.exp(- 0.5 * s_ljk * (xik - mu_jk)**2)
+#         else:
+#             y_k[i] += rho * np.sqrt(2/np.pi)/(np.power(s_ljk, -0.5) + np.power(s_rjk, -0.5))\
+#                    * np.exp(- 0.5 * s_rjk * (xik - mu_jk)**2)
+#         y_k[i] += (1 - rho) * norm.pdf(xik, mu_irr_jk, s_irr_jk)
+#     return y_k
+#
+#
+# def integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b, size=20):
+#     """
+#     estimates the integral
+#     """
+#     N, D = X.shape
+#     temp = np.zeros(len(X))
+#     i = 0
+#     while i < size:
+#         # mu = np.array([np.squeeze(norm.rvs(loc=lam[k], scale=1/r[k], size=1)) for k in range(D)])
+#         mu = draw_MVNormal(mean=lam, cov=1/r)
+#         s_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
+#         s_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
+#         mu_irr = draw_MVNormal(mean=lam, cov=1/r)
+#         #######################
+#         s_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
+#         rho = draw_Beta_dist(delta_a, delta_b)
+#         ini = np.ones(len(X))
+#         for k in range(D):
+#             temp_para = Asymmetric_Gassian_Distribution_pdf(X[:, k], mu[k], s_l[k], s_r[k], mu_irr[k], s_irr[k], rho[k])
+#             ini *= temp_para
+#         temp += ini
+#         i += 1
+#     return temp / float(size)
 
 
 def log_p_alpha(alpha, k, N):
@@ -342,9 +342,9 @@ def log_p_beta(beta, M, cumculative_sum_equation=1):
     """
     the log of beta posteriors
     """
-    return -2*M*special.gammaln(beta/2) \
+    return -M*special.gammaln(beta/2) \
         - 0.5/beta \
-        + (beta*M-1.5)*np.log(beta/2) \
+        + 0.5*(beta*M-3)*np.log(beta/2) \
         + 0.5*beta*cumculative_sum_equation
 
 
@@ -352,10 +352,10 @@ def log_p_beta_prime(beta, M, cumculative_sum_equation=1):
     """
     the derivative log beta posteriors
     """
-    return -2*M*special.psi(0.5*beta) \
+    return -M*special.psi(0.5*beta) \
         + 0.5/beta**2 \
-        + M*np.log(0.5*beta) \
-        + (2*M*beta -3)/beta \
+        + 0.5*M*np.log(0.5*beta) \
+        + (M*beta -3)/beta \
         + 0.5*cumculative_sum_equation
 
 
@@ -367,7 +367,7 @@ def draw_alpha(k, N, size=1):
     return ars.draw(size)
 
 
-def draw_beta_ars(w, s, s_irr, M, k, size=1):
+def draw_beta_ars(w, s, M, k, size=1):
     """
     draw beta from posteriors
     """
@@ -377,11 +377,8 @@ def draw_beta_ars(w, s, s_irr, M, k, size=1):
         cumculative_sum_equation += np.log(sj[k])
         cumculative_sum_equation += np.log(w[k])
         cumculative_sum_equation -= w[k]*sj[k]
-    for sj_irr in s_irr:
-        cumculative_sum_equation += np.log(sj_irr[k])
-        cumculative_sum_equation -= w[k]*sj_irr[k]
     lb = D
-    ars = ARS(log_p_beta, log_p_beta_prime, xi=[lb + 15], lb=lb, ub=float("inf"), \
+    ars = ARS(log_p_beta, log_p_beta_prime, xi=[lb + 5], lb=lb, ub=float("inf"), \
              M=M, cumculative_sum_equation=cumculative_sum_equation)
     return ars.draw(size)
 
