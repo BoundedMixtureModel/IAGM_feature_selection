@@ -25,6 +25,8 @@ def draw_gamma(a, theta, size=1):
     """
     returns Gamma distributed samples
     """
+    # print(a)
+    # print(theta)
     return gamma.rvs(a, loc=0, scale=theta, size=size)
 
 
@@ -411,11 +413,15 @@ def draw_posterior_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_irr, N, M, D):
             Z_ij[i, j] = pi[j] * AGD_pdf_feature_selction(X[i], j, D, rho, mu, s_l, s_r, mu_irr, s_irr)
         Z_i[i] = np.sum(Z_ij[i])
         Z_ij_posteriors[i] = Z_ij[i] / Z_i[i]
+    # if M == 2:
+    #     print("z ij posterior")
+    #     print(Z_ij_posteriors)
     for i in range(N):
         for j in range(M):
             for k in range(D):
                 rele_result = rho[j, k] * AGD_pdf(X[i, k], mu[j, k], s_l[j, k], s_r[j, k]) + 0.000001
                 irr_result = (1 - rho[j, k]) * norm.pdf(X[i, k], mu_irr[j, k], s_irr[j, k]) + 0.000001
                 # posterior_z[i, j, k] = rho[j, k] * AGD_pdf(X[i, k], mu[j, k], s_l[j, k], s_r[j, k]) * Z_ij_posteriors[i, j]
-                posterior_z[i, j, k] = (Z_ij_posteriors[i, j] * rele_result) /(rele_result + irr_result)
+                # posterior_z[i, j, k] = (Z_ij_posteriors[i, j] * rele_result) /(rele_result + irr_result)
+                posterior_z[i, j, k] = rele_result /(rele_result + irr_result)
     return posterior_z
