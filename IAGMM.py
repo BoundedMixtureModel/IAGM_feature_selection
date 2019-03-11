@@ -55,7 +55,7 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
     c = np.zeros(N)            # initialise the stochastic indicators
     pi = np.zeros(1)           # initialise the weights
     rho = np.zeros((1, D))           # initialise the relevancy
-    rho[0] = [0.975, 0.975]
+    rho[0] = [0.95] * D
 
     mu = np.zeros((1, D))      # initialise the means
     mu_irr = np.zeros((1, D))
@@ -80,7 +80,7 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
     w_irr = np.array([np.squeeze(draw_gamma(0.5, 2*vary[k])) for k in range(D)])
     s_l[0, :] = np.array([np.squeeze(draw_gamma(beta_l[k]/2, 2/(beta_l[k]*w_l[k]))) for k in range(D)])
     s_r[0, :] = np.array([np.squeeze(draw_gamma(beta_r[k]/2, 2/(beta_r[k]*w_r[k]))) for k in range(D)])
-    s_irr[0, :] = np.array([np.squeeze(draw_gamma(beta_r[k]/2, 2/(beta_r[k]*w_r[k]))) for k in range(D)])
+    s_irr[0, :] = np.array([np.squeeze(draw_gamma(beta_irr[k]/2, 2/(beta_irr[k]*w_irr[k]))) for k in range(D)])
     delta_a = np.array([np.squeeze(draw_gamma(2, 0.5)) for k in range(D)])
     delta_b = np.array([np.squeeze(draw_gamma(2, 0.5)) for k in range(D)])
     lam = draw_MVNormal(mean=muy, cov=vary)
@@ -88,6 +88,8 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
     lam_irr = draw_MVNormal(mean=muy, cov=vary)
     r_irr = np.array([np.squeeze(draw_gamma(0.5, 2/vary[k])) for k in range(D)])
     alpha = 1.0/draw_gamma(0.5, 2.0)
+    mu_irr += 3 * 1/np.sqrt(s_irr)
+
 
     # set only 1 component, m is the component number
     M = 1
@@ -106,8 +108,10 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
         for k in range(D):
             vary[k] = np.var(X[:, k])
         precisiony = 1/vary
+        # print(vary)
+        # print(precisiony)
+        # time.sleep(100)
         posterior_z = draw_posterior_z(X, pi, rho, mu, s_l, s_r, mu_irr, s_irr, N, M, D)
-        # print(posterior_z)
 
         # draw z from Bernoulli distribution
         for i in range(N):
@@ -115,9 +119,6 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
                 for k in range(D):
                     z_indicators[i, j, k] = draw_Bernoulli(posterior_z[i, j, k])
 
-        # print('parameters for mu')
-        # print(z_indicators.shape)
-        # print(z_indicators)
         mu_cache = mu
         mu = np.zeros((M, D))
         # draw mu and mu_irr from posterior
@@ -141,27 +142,12 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
                 rel_x_r_sum = np.sum(rel_x_k[rel_x_k >= mu_cache[j][k]])
                 r_n = r[k] + p * s_l[j, k] + q * s_r[j, k]
                 mu_n = (s_l[j, k] * rel_x_l_sum + s_r[j, k] * rel_x_r_sum + r[k] * lam[k])/r_n
-                # if j == 1:
-                #     print(r[k])
-                #     print(p)
-                #     print(s_l[j, k])
-                #     print(q)
-                #     print(s_r[j, k])
-                #     print(p * s_l[j, k])
-                #     print(q * s_r[j, k])
-                #     print(mu_n)
-                #     print(1/r_n)
-                #     print(draw_normal(mu_n, 1/r_n))
-                #     print("****")
                 mu[j, k] = draw_normal(mu_n, 1/r_n)
 
                 irr_x_sum = np.sum(irr_x_k[irr_x_k >= mu_cache[j][k]])
                 r_n_irr = r_irr[k] + irr_x_k_num * s_irr[j, k]
                 mu_n_irr = (s_irr[j, k] * irr_x_sum + r_irr[k] * lam_irr[k])/r_n_irr
                 mu_irr[j, k] = draw_normal(mu_n_irr, 1/r_n_irr)
-        # print("this is mu")
-        # print(mu)
-        # print(mu_irr)
 
         # draw lambda from posterior
         mu_sum = np.sum(mu, axis=0)
@@ -218,25 +204,25 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
                 s_r[j][k] = MH_Sampling_posterior_srjk(s_ljk=s_l[j][k], s_rjk=s_r[j][k], nj=rel_x_k_num, beta=beta_r[k],
                                                        w=w_r[k], sum=cumculative_sum_right_equation)
                 irr_cumculative_sum = np.sum((irr_x_k - mu[j][k]) **2)
-                s_irr[j][k] = draw_gamma((beta_irr[k] + irr_x_k_num) / 2, 2 / beta_irr[k] * w_irr[k] + irr_cumculative_sum)
+                s_irr[j][k] = draw_gamma((beta_irr[k] + irr_x_k_num) / 2, 2 / (beta_irr[k] * w_irr[k] + irr_cumculative_sum))
 
         # draw w from posterior
-        # vary or precisiony
-        w_l = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_l[k]+1), 2/(vary[k] + beta_l[k]*np.sum(s_l, axis=0)[k])))
+        w_l = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_l[k]+1), 2/(precisiony[k] + beta_l[k]*np.sum(s_l, axis=0)[k])))
                         for k in range(D)])
-        w_r = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_r[k]+1), 2/(vary[k] + beta_r[k]*np.sum(s_r, axis=0)[k])))
+        w_r = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_r[k]+1), 2/(precisiony[k] + beta_r[k]*np.sum(s_r, axis=0)[k])))
                         for k in range(D)])
-        w_irr = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_irr[k]+1), 2/(vary[k] + beta_irr[k]*np.sum(s_irr, axis=0)[k])))
+        w_irr = np.array([np.squeeze(draw_gamma(0.5 *(M*beta_irr[k]+1), 2/(precisiony[k] + beta_irr[k]*np.sum(s_irr, axis=0)[k])))
                         for k in range(D)])
 
         # draw beta from posterior. Because its not standard form, using ARS to sampling.
-        beta_l = np.array([draw_beta_ars(w_l, s_l, M, k)[0] for k in range(D)])
-        beta_r = np.array([draw_beta_ars(w_r, s_r, M, k)[0] for k in range(D)])
-        beta_irr = np.array([draw_beta_ars(w_irr, s_irr, M, k)[0] for k in range(D)])
+        beta_l = np.array([draw_beta_ars(w_l, s_l, M, k, D)[0] for k in range(D)])
+        beta_r = np.array([draw_beta_ars(w_r, s_r, M, k, D)[0] for k in range(D)])
+        beta_irr = np.array([draw_beta_ars(w_irr, s_irr, M, k, D)[0] for k in range(D)])
 
         # compute the unrepresented probability
-        # p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r, delta_a, delta_b)
-        p_unrep = (alpha / (N - 1.0 + alpha)) * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )
+        # p_unrep = alpha * integral_approx_selection(X, lam, r, beta_l, beta_r, w_l, w_r, lam_irr, r_irr, beta_irr, w_irr,
+        #                                             delta_a, delta_b)
+        p_unrep = alpha * integral_approx(X, lam, r, beta_l, beta_r, w_l, w_r )
         p_indicators_prior = np.outer(np.ones(M + 1), p_unrep)
 
         # for the represented components
@@ -255,9 +241,9 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
             #         else:
             #             Y += rho[j, k] / (np.power(s_l[j, k], -0.5) + np.power(s_r[j][k], -0.5))* \
             #                         np.exp(- 0.5 * s_r[j, k] * np.power(X[i, k] - mu[j, k], 2))
-            #         Y += (1 - rho[j, k]) * norm.pdf(X[i, k], mu_irr[j, k], s_irr[j, k])
+            #         Y += (1 - rho[j, k]) * norm.pdf(X[i, k], mu_irr[j, k], 1/s_irr[j, k])
             #         likelihood_for_associated_data[i] *= Y
-            # p_indicators_prior[j, idx] = nij[idx] / (N - 1.0 + alpha) * likelihood_for_associated_data
+            # p_indicators_prior[j, idx] = nij[idx] * likelihood_for_associated_data
             likelihood_for_associated_data = np.ones(len(idx))
             for i in range(len(idx)):
                 for k in range(D):
@@ -270,35 +256,35 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
             p_indicators_prior[j, idx] = nij[idx]/(N - 1.0 + alpha)*likelihood_for_associated_data
         # stochastic indicator (we could have a new component)
         c = np.hstack(draw_indicator(p_indicators_prior))
-        # print(p_indicators_prior)
-
+        print(p_indicators_prior)
         f = np.array([[np.count_nonzero(z_indicators[:, j, k] == 1) for k in range(D)] for j in range(M)])
+
         # draw rho from posterior
         for j in range(M):
             for k in range(D):
                 rho[j, k] = draw_Beta_dist(f[j, k] + delta_a[k], N - f[j, k] + delta_b[k])
+        # print(rho)
 
         # draw delta from posterior
         for k in range(D):
             delta_a[k] = MH_Sampling_posterior_delta_a(delta_a[k], delta_b[k], rho, k, M)
             delta_b[k] = MH_Sampling_posterior_delta_b(delta_a[k], delta_b[k], rho, k, M)
+        # print("draw delta from posteriors")
+        # print(delta_a)
+        # print(delta_b)
 
         # sort out based on new stochastic indicators
         nij = np.sum(c == M)        # see if the *new* component has occupancy
         if nij > 0:
             # draw from priors and increment M
-            # print("new component")
             newmu = np.array([np.squeeze(draw_normal(lam[k], 1 / r[k])) for k in range(D)])
-            # print(newmu)
-            # newmu = draw_MVNormal(lam, 1/r)
+            # newmu = draw_MVNormal(mean=lam, cov=1/r)
             news_l = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
             news_r = np.array([np.squeeze(draw_gamma(beta_r[k] / 2, 2 / (beta_r[k] * w_r[k]))) for k in range(D)])
-            # print(news_l)
-            # print(news_r)
-            newmu_irr = np.array([np.squeeze(draw_normal(lam[k], 1 / r[k])) for k in range(D)])
-            news_irr = np.array([np.squeeze(draw_gamma(beta_l[k] / 2, 2 / (beta_l[k] * w_l[k]))) for k in range(D)])
-            # newrho = draw_Beta_dist(delta_a, delta_b)
-            newrho = np.array([0.975, 0.975])
+            newmu_irr = np.array([np.squeeze(draw_normal(lam_irr[k], 1 / r_irr[k])) for k in range(D)])
+            # newmu_irr = draw_MVNormal(mean=lam, cov=1/r)
+            news_irr = np.array([np.squeeze(draw_gamma(beta_irr[k] / 2, 2 / (beta_irr[k] * w_irr[k]))) for k in range(D)])
+            newrho = draw_Beta_dist(delta_a, delta_b)
             new_z_indicators = np.ones((N, 1, D))
 
             mu = np.concatenate((mu, np.reshape(newmu, (1, D))))
@@ -349,9 +335,7 @@ def infinte_mixutre_model(X, Nsamples=200, Nint=50, anneal=False):
         Samp.addsample(newS)
         iter += 1
         print(n)
-        print(mu)
-        print(s_l)
-        print(s_r)
+        print(mu[:, 0])
         # print(rho)
     return Samp, X, c, n
 
