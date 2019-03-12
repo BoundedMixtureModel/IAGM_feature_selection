@@ -13,7 +13,6 @@ from numba import jit, njit, autojit, vectorize, guvectorize, float64, float32
 maxsize = sys.maxsize
 
 
-
 # def draw_gamma_ras(a, theta, size=1):
 #     """
 #     returns Gamma distributed samples according to the Rasmussen (2000) definition
